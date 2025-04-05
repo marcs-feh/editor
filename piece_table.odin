@@ -134,9 +134,23 @@ to_piece_position :: proc(table: Piece_Table, vp: Virtual_Position) -> (Piece_Co
 	return {}, false
 }
 
-// insert_text :: proc(table: ^Piece_Table, pos: Position, text: string){
-//
-// }
+piece_resize :: proc(table: ^Piece_Table, piece_index: int, start, length: i32, loc := #caller_location){
+	piece := table.pieces[piece_index]
+	buf_length := len(table.append_buf if piece.type == .Append else table.original_buf)
+
+	assert(int(start + length) <= buf_length, "Piece goes outside of buffer bounds", loc)
+
+	piece.start = start
+	piece.length = length
+	table.pieces[piece_index] = piece
+}
+
+piece_at_end_of_append_buffer :: proc(){}
+
+insert_piece_bytes :: proc(table: ^Piece_Table, pos: Piece_Coordinate, data: []byte){
+}
+
+
 
 display :: proc(table: Piece_Table){
 	HILIGHT :: "\e[1;33m"

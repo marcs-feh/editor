@@ -55,7 +55,7 @@ main :: proc(){
 	rl.SetTargetFPS(60)
 
 	font := rl.LoadFontFromMemory(".OTF", raw_data(FONT), auto_cast len(FONT), FONT_SIZE, nil, -1)
-	rl.SetTextureFilter(font.texture, .POINT)
+	rl.SetTextureFilter(font.texture, .BILINEAR)
 
 	// --- Table init ---
 	TEXT :: "Hellope, world!"
@@ -81,6 +81,7 @@ main :: proc(){
 
 	cyan :: rl.Color{ 0x50, 0xd3, 0xf4, 0xff}
 	yellow :: rl.Color{ 0xf4, 0xe6, 0x50, 0xff}
+	gray :: rl.Color{ 0xde, 0xde, 0xde, 0xff }
 
 	for !rl.WindowShouldClose() {
 		rl.BeginDrawing()
@@ -101,7 +102,7 @@ main :: proc(){
 		}
 		/* Text view */ {
 			w, h := draw_text(font, "Content:", BASE_POS + offset, rl.WHITE)
-			draw_text(font, text_view, BASE_POS + offset + {0, h} , yellow)
+			draw_text(font, text_view, BASE_POS + offset + {0, h} , gray)
 			offset.y += h
 		}
 
