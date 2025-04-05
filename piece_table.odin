@@ -64,14 +64,18 @@ buffer_append :: proc {
 	buffer_append_bytes,
 }
 
-buffer_append_string :: proc(table: ^Piece_Table, data: string) -> (start: i32){
+buffer_append_string :: proc(table: ^Piece_Table, data: string) -> (Piece, bool){
 	return buffer_append_bytes(table, transmute([]byte)data)
 }
 
-buffer_append_bytes :: proc(table: ^Piece_Table, data: []u8) -> (start: i32){
-	s := len(table.append_buf)
+// Append bytes to end of buffer, returns piece pointing to it. The piece is not inserted in the table
+buffer_append_bytes :: proc(table: ^Piece_Table, data: []u8) -> (piece: Piece, ok: bool){
+	ok = len(data) > 0
+	piece.type = .Append
+	piece.start = i32(len(table.append_buf))
+	piece.length = i32(len(data))
 	append(&table.append_buf, ..data)
-	return i32(s)
+	return
 }
 
 piece_add :: proc(table: ^Piece_Table, index: int, type: Piece_Type, start, length: i32, loc := #caller_location){
@@ -92,7 +96,7 @@ piece_add :: proc(table: ^Piece_Table, index: int, type: Piece_Type, start, leng
 Virtual_Position :: distinct int
 
 // Position in terms of a piece index and an offset into it
-Piece_Coordinate :: struct {
+Piece_Position :: struct {
 	index: int,
 	offset: int,
 }
@@ -117,14 +121,14 @@ table_build_string :: proc(table: Piece_Table, allocator := context.allocator) -
 	return string(buf[:]), nil
 }
 
-to_piece_position :: proc(table: Piece_Table, vp: Virtual_Position) -> (Piece_Coordinate, bool) {
+to_piece_position :: proc(table: Piece_Table, vp: Virtual_Position) -> (Piece_Position, bool) {
 	vp := int(vp)
 	acc := 0
 
 	for piece, idx in table.pieces {
 		acc += int(piece.length)
 		if acc >= vp {
-			return Piece_Coordinate {
+			return Piece_Position {
 				index = idx,
 				offset = acc - vp
 			}, true
@@ -145,12 +149,56 @@ piece_resize :: proc(table: ^Piece_Table, piece_index: int, start, length: i32, 
 	table.pieces[piece_index] = piece
 }
 
-piece_at_end_of_append_buffer :: proc(){}
-
-insert_piece_bytes :: proc(table: ^Piece_Table, pos: Piece_Coordinate, data: []byte){
+piece_is_appendable :: proc(table: Piece_Table, index: int) -> bool {
+	piece := table.pieces[index]
+	return piece.type == .Append && (int(piece.start + piece.length) == len(table.append_buf))
 }
 
+piece_append :: proc(table: ^Piece_Table, index: int, data: []byte){
+	assert(piece_is_appendable(table^, index), "Piece is not appendable")
+	if extra, ok := buffer_append(table, data); ok {
+		table.pieces[index].length += extra.length
+	}
+}
 
+insert_at_start_of_piece :: proc {
+	insert_string_at_start_of_piece,
+	insert_bytes_at_start_of_piece,
+}
+
+insert_string_at_start_of_piece :: proc(table: ^Piece_Table, index: int, data: string){
+	insert_bytes_at_start_of_piece(table, index, transmute([]byte)data)
+}
+
+insert_bytes_at_start_of_piece :: proc(table: ^Piece_Table, index: int, data: []byte, loc := #caller_location){
+	assert(index < len(table.pieces), fmt.tprint("Out of bounds piece index:", index))
+
+	if index == 0 {
+		if new_piece, ok := buffer_append(table, data); ok {
+			inject_at(&table.pieces, 0, new_piece)
+		}
+	}
+	else {
+		previous := index - 1
+		if piece_is_appendable(table^, previous){
+			piece_append(table, previous, data)
+		}
+		else {
+			if new_piece, ok := buffer_append(table, data); ok {
+				inject_at(&table.pieces, 0, new_piece)
+			}
+		}
+	}
+}
+
+insert_bytes_at_piece :: proc(table: ^Piece_Table, pos: Piece_Position, data: []byte){
+	// Base case
+	if pos.offset == 0 {
+		insert_at_start_of_piece(table, pos.index, data)
+		return
+	}
+	unimplemented("FUCK")
+}
 
 display :: proc(table: Piece_Table){
 	HILIGHT :: "\e[1;33m"
