@@ -185,19 +185,60 @@ insert_bytes_at_start_of_piece :: proc(table: ^Piece_Table, index: int, data: []
 		}
 		else {
 			if new_piece, ok := buffer_append(table, data); ok {
-				inject_at(&table.pieces, 0, new_piece)
+				inject_at(&table.pieces, index, new_piece)
 			}
 		}
 	}
 }
 
+piece_empty :: #force_inline proc "contextless" (piece: Piece) -> bool {
+	return piece.length <= 0
+}
+
+piece_split :: proc(table: ^Piece_Table, piece_index: int, split_offset: i32) -> (left, right: Piece) {
+	piece := table.pieces[piece_index]
+	assert(split_offset < piece.length, "Offset is outside of piece")
+
+	left.type   = piece.type
+	left.start  = piece.start
+	left.length = split_offset
+
+	right.type   = piece.type
+	right.start  = piece.start + split_offset
+	right.length = piece.length - split_offset
+
+	inject_at(&table.pieces, piece_index, left)
+	table.pieces[piece_index + 1] = right
+
+	return
+}
+
+insert_at_piece :: proc {
+	insert_string_at_piece,
+	insert_bytes_at_piece,
+}
+
+insert_string_at_piece :: proc(table: ^Piece_Table, pos: Piece_Position, data: string){
+	insert_bytes_at_piece(table, pos, transmute([]byte)data)
+}
+
 insert_bytes_at_piece :: proc(table: ^Piece_Table, pos: Piece_Position, data: []byte){
-	// Base case
+	if len(data) == 0 { return }
+
+	if pos.index == len(table.pieces){
+		if piece, ok := buffer_append(table, data); ok {
+			append(&table.pieces, piece)
+		}
+		return
+	}
+
 	if pos.offset == 0 {
 		insert_at_start_of_piece(table, pos.index, data)
 		return
 	}
-	unimplemented("FUCK")
+
+	left, right := piece_split(table, pos.index, i32(pos.offset))
+	insert_at_start_of_piece(table, pos.index + 1, data)
 }
 
 display :: proc(table: Piece_Table){
@@ -209,13 +250,13 @@ display :: proc(table: Piece_Table){
 	fmt.printfln("  Append: %q", string(table.append_buf[:]))
 
 	fmt.println("> " + HILIGHT + "Pieces" + RESET)
-	fmt.printfln("% 4s | % 4s | % 4s | %s", "BUF", "OFF", "LEN", "DATA")
+	fmt.printfln("% 2s | A | % 4s | % 4s | %s", "ID", "OFF", "LEN", "DATA")
 
-	for piece in table.pieces {
-		t := "O" if piece.type == .Original else "A"
+	for piece, i in table.pieces {
+		t := " " if piece.type == .Original else "+"
 		buf := table.append_buf if piece.type == .Append else table.original_buf
 		content := string(buf[piece.start:][:piece.length])
-		fmt.printfln("% 4v | % 4d | % 4d | %q", t, piece.start, piece.length, content)
+		fmt.printfln("% 2d | %s | % 4d | % 4d | %q", i, t, piece.start, piece.length, content)
 	}
 
 	fmt.println("> " + HILIGHT + "Content" + RESET)
