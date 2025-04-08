@@ -195,7 +195,8 @@ piece_empty :: #force_inline proc "contextless" (piece: Piece) -> bool {
 	return piece.length <= 0
 }
 
-piece_split :: proc(table: ^Piece_Table, piece_index: int, split_offset: i32) -> (left, right: Piece) {
+@require_results
+piece_split :: proc(table: ^Piece_Table, #any_int piece_index: int, split_offset: i32) -> (left, right: Piece) {
 	piece := table.pieces[piece_index]
 	assert(split_offset < piece.length, "Offset is outside of piece")
 
@@ -209,6 +210,34 @@ piece_split :: proc(table: ^Piece_Table, piece_index: int, split_offset: i32) ->
 
 	inject_at(&table.pieces, piece_index, left)
 	table.pieces[piece_index + 1] = right
+
+	return
+}
+
+piece_delete_bytes :: proc(table: ^Piece_Table, pos: Piece_Position, count: i32) -> (deleted: bool) {
+	piece := &table.pieces[pos.index]
+
+	assert(i32(pos.offset) + count <= piece.length, fmt.tprint("Count", count, "goes beyond piece", piece.length))
+
+	if pos.offset == 0 {
+		piece.start += count
+		piece.length -= count
+		if piece.length <= 0 {
+			ordered_remove(&table.pieces, pos.index)
+			deleted = true
+		}
+	}
+	else if i32(pos.offset) == piece.length - count {
+		piece.length -= count
+		if piece.length <= 0 {
+			ordered_remove(&table.pieces, pos.index)
+			deleted = true
+		}
+	}
+	else {
+		left, right := piece_split(table, pos.index, i32(pos.offset))
+		return piece_delete_bytes(table, {pos.index + 1, 0}, count)
+	}
 
 	return
 }
@@ -240,6 +269,7 @@ insert_bytes_at_piece :: proc(table: ^Piece_Table, pos: Piece_Position, data: []
 	left, right := piece_split(table, pos.index, i32(pos.offset))
 	insert_at_start_of_piece(table, pos.index + 1, data)
 }
+
 
 display :: proc(table: Piece_Table){
 	HILIGHT :: "\e[1;33m"
