@@ -11,8 +11,8 @@ Piece_Type :: enum u8 {
 }
 
 Piece :: struct {
-	start: i32,
-	length: i32,
+	start: int,
+	length: int,
 	type: Piece_Type,
 }
 
@@ -31,9 +31,9 @@ Edit_Op :: enum u8 {
 
 Operation :: struct {
 	text_data: []u8,
-	table_index: i32,
-	new_start: i32,
-	new_length: i32,
+	table_index: int,
+	new_start: int,
+	new_length: int,
 	type: Piece_Type,
 }
 
@@ -53,7 +53,7 @@ table_create :: proc(original_text: string, allocator := context.allocator) -> (
 	append(&table.pieces, Piece {
 		type = .Original,
 		start = 0,
-		length = i32(len(table.original_buf)),
+		length = len(table.original_buf),
 	})
 
 	return
@@ -72,13 +72,13 @@ buffer_append_string :: proc(table: ^Piece_Table, data: string) -> (Piece, bool)
 buffer_append_bytes :: proc(table: ^Piece_Table, data: []u8) -> (piece: Piece, ok: bool){
 	ok = len(data) > 0
 	piece.type = .Append
-	piece.start = i32(len(table.append_buf))
-	piece.length = i32(len(data))
+	piece.start = len(table.append_buf)
+	piece.length = len(data)
 	append(&table.append_buf, ..data)
 	return
 }
 
-piece_add :: proc(table: ^Piece_Table, index: int, type: Piece_Type, start, length: i32, loc := #caller_location){
+piece_add :: proc(table: ^Piece_Table, index: int, type: Piece_Type, start, length: int, loc := #caller_location){
 	piece := Piece {
 		type = type,
 		start = start,
@@ -87,7 +87,7 @@ piece_add :: proc(table: ^Piece_Table, index: int, type: Piece_Type, start, leng
 
 	buf_length := len(table.append_buf if type == .Append else table.original_buf)
 
-	assert(int(start + length) <= buf_length, "Piece goes outside of buffer bounds", loc)
+	assert(start + length <= buf_length, "Piece goes outside of buffer bounds", loc)
 
 	inject_at(&table.pieces, index, piece)
 }
@@ -104,7 +104,7 @@ Piece_Position :: struct {
 table_text_length :: proc(table: Piece_Table) -> int {
 	acc := 0
 	for p in table.pieces {
-		acc += int(p.length)
+		acc += p.length
 	}
 	return acc
 }
@@ -126,7 +126,7 @@ to_piece_position :: proc(table: Piece_Table, vp: Virtual_Position) -> (Piece_Po
 	acc := 0
 
 	for piece, idx in table.pieces {
-		acc += int(piece.length)
+		acc += piece.length
 		if acc >= vp {
 			return Piece_Position {
 				index = idx,
@@ -138,11 +138,11 @@ to_piece_position :: proc(table: Piece_Table, vp: Virtual_Position) -> (Piece_Po
 	return {}, false
 }
 
-piece_resize :: proc(table: ^Piece_Table, piece_index: int, start, length: i32, loc := #caller_location){
+piece_resize :: proc(table: ^Piece_Table, piece_index: int, start, length: int, loc := #caller_location){
 	piece := table.pieces[piece_index]
 	buf_length := len(table.append_buf if piece.type == .Append else table.original_buf)
 
-	assert(int(start + length) <= buf_length, "Piece goes outside of buffer bounds", loc)
+	assert(start + length <= buf_length, "Piece goes outside of buffer bounds", loc)
 
 	piece.start = start
 	piece.length = length
@@ -151,7 +151,7 @@ piece_resize :: proc(table: ^Piece_Table, piece_index: int, start, length: i32, 
 
 piece_is_appendable :: proc(table: Piece_Table, index: int) -> bool {
 	piece := table.pieces[index]
-	return piece.type == .Append && (int(piece.start + piece.length) == len(table.append_buf))
+	return piece.type == .Append && piece.start + piece.length == len(table.append_buf)
 }
 
 piece_append :: proc(table: ^Piece_Table, index: int, data: []byte){
@@ -196,8 +196,9 @@ piece_empty :: #force_inline proc "contextless" (piece: Piece) -> bool {
 }
 
 @require_results
-piece_split :: proc(table: ^Piece_Table, #any_int piece_index: int, split_offset: i32) -> (left, right: Piece) {
-	piece := table.pieces[piece_index]
+piece_split :: proc(table: ^Piece_Table, pos: Piece_Position) -> (left, right: Piece) {
+	piece := table.pieces[pos.index]
+	split_offset := int(pos.offset)
 	assert(split_offset < piece.length, "Offset is outside of piece")
 
 	left.type   = piece.type
@@ -208,16 +209,16 @@ piece_split :: proc(table: ^Piece_Table, #any_int piece_index: int, split_offset
 	right.start  = piece.start + split_offset
 	right.length = piece.length - split_offset
 
-	inject_at(&table.pieces, piece_index, left)
-	table.pieces[piece_index + 1] = right
+	inject_at(&table.pieces, pos.index, left)
+	table.pieces[pos.index + 1] = right
 
 	return
 }
 
-piece_delete_bytes :: proc(table: ^Piece_Table, pos: Piece_Position, count: i32) -> (deleted: bool) {
+piece_delete_bytes :: proc(table: ^Piece_Table, pos: Piece_Position, count: int) -> (deleted: bool) {
 	piece := &table.pieces[pos.index]
 
-	assert(i32(pos.offset) + count <= piece.length, fmt.tprint("Count", count, "goes beyond piece", piece.length))
+	assert(int(pos.offset) + count <= piece.length, fmt.tprint("Count", count, "goes beyond piece", piece.length))
 
 	if pos.offset == 0 {
 		piece.start += count
@@ -227,7 +228,7 @@ piece_delete_bytes :: proc(table: ^Piece_Table, pos: Piece_Position, count: i32)
 			deleted = true
 		}
 	}
-	else if i32(pos.offset) == piece.length - count {
+	else if int(pos.offset) == piece.length - count {
 		piece.length -= count
 		if piece.length <= 0 {
 			ordered_remove(&table.pieces, pos.index)
@@ -235,7 +236,7 @@ piece_delete_bytes :: proc(table: ^Piece_Table, pos: Piece_Position, count: i32)
 		}
 	}
 	else {
-		left, right := piece_split(table, pos.index, i32(pos.offset))
+		left, right := piece_split(table, {pos.index, pos.offset})
 		return piece_delete_bytes(table, {pos.index + 1, 0}, count)
 	}
 
@@ -254,7 +255,7 @@ insert_string_at_piece :: proc(table: ^Piece_Table, pos: Piece_Position, data: s
 insert_bytes_at_piece :: proc(table: ^Piece_Table, pos: Piece_Position, data: []byte){
 	if len(data) == 0 { return }
 
-	if pos.index == len(table.pieces){
+	if pos.index == len(table.pieces) {
 		if piece, ok := buffer_append(table, data); ok {
 			append(&table.pieces, piece)
 		}
@@ -266,10 +267,41 @@ insert_bytes_at_piece :: proc(table: ^Piece_Table, pos: Piece_Position, data: []
 		return
 	}
 
-	left, right := piece_split(table, pos.index, i32(pos.offset))
+	left, right := piece_split(table, {pos.index, pos.offset})
 	insert_at_start_of_piece(table, pos.index + 1, data)
 }
 
+delete_bytes :: proc(table: ^Piece_Table, pos: Piece_Position, count: int){
+	count := count
+	pos := pos
+
+	piece := table.pieces[pos.index]
+	assert(piece.length - pos.offset > 0, "Improper position for first piece")
+
+	n := min(count, piece.length - pos.offset)
+	deleted := piece_delete_bytes(table, pos, n)
+
+	pos.offset = 0
+	count -= n
+
+	for count > 0 {
+		if !deleted {
+			pos.index += 1
+			if pos.index >= len(table.pieces) {
+				break
+			}
+		}
+
+		piece := table.pieces[pos.index]
+		assert(piece.length - pos.offset > 0, "Improper position for first piece")
+
+		n = min(count, piece.length - pos.offset)
+		deleted = piece_delete_bytes(table, pos, n)
+
+		pos.offset = 0
+		count -= n
+	}
+}
 
 display :: proc(table: Piece_Table){
 	HILIGHT :: "\e[1;33m"
