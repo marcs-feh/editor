@@ -19,5 +19,6 @@ main :: proc(){
 
 	delete_bytes(&table, {0, 0}, 9)
 	delete_bytes(&table, {0, 5}, 1)
+	delete_bytes(&table, {0, 1}, 4)
 	display(table)
 }
