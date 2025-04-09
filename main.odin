@@ -12,7 +12,30 @@ import "core:strings"
 KeyModifier :: enum u8 {
 	Control,
 	Alt,
-	Shift,
+	// Shift,
+}
+
+SpecialKey :: enum rune {
+	// Use the surrogate pair range to represent them as runes, the editor is
+	// UTF-8 so these codepoints should never appear
+	Escape = 0xd800 + 1,
+	Return,
+	Backspace,
+	Tab,
+}
+
+map_to_special :: proc(k: Key) -> (special: SpecialKey, ok: bool) {
+	if k.mods == { .Control } {
+		ok = true
+		switch k.codepoint {
+		case 'M': special = .Return
+		case 'I': special = .Tab
+		case '[': special = .Escape
+		case: ok = false
+		}
+	}
+
+	return
 }
 
 KeyModifiers :: bit_set[KeyModifier; u8]
@@ -22,13 +45,12 @@ Key :: struct {
 	mods: KeyModifiers,
 }
 
-import win "core:sys/windows"
-
-slice_peek :: proc(s: []$T, i: int) -> (e: T, ok: bool) {
+slice_peek :: proc "contextless" (s: []$T, i: int) -> (e: T, ok: bool) {
 	if i < 0 || i >= len(s){
 		return
 	}
-	return s[i], true
+	#no_bounds_check e = s[i]
+	return e, true
 }
 
 key_decode :: proc(input: []byte) -> (key: Key, rest: []byte) {
@@ -36,15 +58,38 @@ key_decode :: proc(input: []byte) -> (key: Key, rest: []byte) {
 
 	consumed := 0
 
-	if input[0] == '\e' {
-		next, ok := slice_peek(input, 1)
+	char := rune(input[0])
 
-		if ok {
-			n : int
-			key.codepoint, n = utf8.decode_rune(input[1:])
-			key.mods += { .Alt }
-			consumed += max(0, n)
+	if char == '\e' {
+		next, ok := slice_peek(input, 1)
+		if !ok || next == '\e' {
+			key.codepoint = rune(SpecialKey.Escape)
+			rest = input[consumed:]
+			return
 		}
+		key.mods += { .Alt }
+		consumed += 1
+	}
+
+	char = rune(input[consumed])
+	if char >= 1 && char <= 26 {
+		letter := 'A' + (char - 1)
+		key.mods += { .Control }
+		key.codepoint = letter
+		consumed += 1
+	}
+	else if char == 0 {
+		key.mods += { .Control }
+		key.codepoint = ' '
+	}
+	else {
+		r, n := utf8.decode_rune(input[consumed:])
+		consumed += max(1, n) // Force input to continue, even with errors
+		key.codepoint = r
+	}
+
+	if special, ok := map_to_special(key); ok {
+		key.codepoint = rune(special)
 	}
 
 	rest = input[consumed:]
@@ -64,17 +109,11 @@ main :: proc(){
 	running := true
 
 	for running {
-		n : u32
-		win.ReadConsoleW(term, raw_data(buffer), auto_cast len(buffer), &n, nil)
-
-		dec := utf16.decode_to_utf8(input, buffer[:n])
-		inputstr := string(input[:dec])
-
-		// fmt.printfln("%q -> %v", inputstr, buffer[:n])
-
+		input, _ := terminal_read_input(term, input)
 		key, _ := key_decode(input)
-		fmt.println(key)
-		if input[0] == 3 {
+		fmt.println(input, int(key.codepoint), key)
+
+		if len(input) > 0 && input[0] == 3 {
 			running = false
 		}
 	}
