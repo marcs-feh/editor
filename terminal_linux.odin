@@ -10,8 +10,7 @@ terminal_setup :: proc(){
 	posix.tcgetattr(posix.STDIN_FILENO, &term)
 
 	term.c_lflag -= { .ICANON, .ECHO, .ISIG, }
-	term.c_iflag -= {}
-
+	term.c_iflag = {}
 
 	ok := posix.tcsetattr(posix.STDIN_FILENO, .TCSAFLUSH, &term) == .OK
 	ensure(ok, "Failed to set terminal attribute")
