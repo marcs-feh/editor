@@ -22,6 +22,8 @@ SpecialKey :: enum rune {
 	Return,
 	Backspace,
 	Tab,
+	Home,
+	End,
 	Up,
 	Down,
 	Right,
@@ -33,7 +35,7 @@ special_key :: proc(code: SpecialKey) -> rune {
 }
 
 map_to_special :: proc(k: Key) -> (special: SpecialKey, ok: bool) {
-	if k.mods == { .Control } {
+	if .Control in k.mods {
 		ok = true
 		switch k.codepoint {
 		case 'M': special = .Return
@@ -92,8 +94,6 @@ key_parser_has_prefix :: proc(parser: Raw_Key_Parser, prefix: []u8) -> bool {
 	return slice.has_prefix(current_input, prefix)
 }
 
-// key_parser_next :: proc(parser: ^Raw_Key_Parser) -> (Key, bool){}
-
 key_parser_next :: proc(parser: ^Raw_Key_Parser) -> (key: Key, had_key: bool) {
 	if(key_parser_done(parser^)){ return }
 
@@ -109,6 +109,7 @@ key_parser_next :: proc(parser: ^Raw_Key_Parser) -> (key: Key, had_key: bool) {
 
 	ARROW_CTRL_SHIFT_ALT :: []u8{'1', ';', '8'}
 
+	// Special long sequences
 	if key_parser_has_prefix(parser^, CSI){
 		parser.current += len(CSI)
 
@@ -135,6 +136,45 @@ key_parser_next :: proc(parser: ^Raw_Key_Parser) -> (key: Key, had_key: bool) {
 		return key, true
 	}
 
+	char, _ := key_parser_advance(parser)
+
+	// Alt + Something
+	if char == '\e' {
+		if key_parser_done(parser^) || parser.input[parser.current] == '\e' {
+			key.codepoint = special_key(.Escape)
+			key.mods = {}
+			return key, true
+		}
+
+		key.mods += { .Alt }
+		char, _ = key_parser_advance(parser)
+	}
+
+	// Control + letter
+	if char < 27 {
+		key.mods += { .Control }
+		key.codepoint = rune('A' + char - 1)
+		if char == 0 {
+			key.codepoint = ' '
+		}
+
+		if special, is_special := map_to_special(key); is_special {
+			key.codepoint = rune(special)
+			key.mods -= { .Control }
+		}
+		return key, true
+	}
+
+	// Regular char
+	if char < 0x80 {
+		parser.current -= 1
+
+		r, n := utf8.decode_rune(parser.input[parser.current:])
+		parser.current += max(n, 1)
+		key.codepoint = r
+		return key, true
+	}
+
 	return
 }
 
@@ -152,73 +192,6 @@ key_decode :: proc(output: []Key, input: []byte) -> []Key{
 	}
 
 	return output[:count]
-
-	// if len(input) < 1 { return }
-	//
-	// is_upper_ascii_alpha :: proc(r: rune) -> bool {
-	// 	return r >= 'A' && r <= 'Z'
-	// }
-	//
-	// consumed := 0
-	//
-	// char := rune(input[0])
-	//
-	// // Arrow handling
-	// was_arrow := true
-	// switch {
-	// case slice.has_prefix(input, ARROW_UP):    key.codepoint = rune(SpecialKey.Up)
-	// case slice.has_prefix(input, ARROW_DOWN):  key.codepoint = rune(SpecialKey.Down)
-	// case slice.has_prefix(input, ARROW_RIGHT): key.codepoint = rune(SpecialKey.Right)
-	// case slice.has_prefix(input, ARROW_LEFT):  key.codepoint = rune(SpecialKey.Left)
-	// case: was_arrow = false
-	// }
-	//
-	// if was_arrow {
-	// 	rest = input[:len(ARROW_UP)]
-	// 	return
-	// }
-	//
-	// if char == '\e' {
-	// 	next : u8
-	// 	has_next := len(input) > 1
-	// 	if has_next {
-	// 		next = input[1]
-	// 	}
-	//
-	// 	if next == '\e' || !has_next {
-	// 		// Pure `escape`
-	// 		key.codepoint = rune(SpecialKey.Escape)
-	// 		rest = input[consumed:]
-	// 		return
-	// 	}
-	//
-	// 	key.mods += { .Alt }
-	// 	consumed += 1
-	// }
-	//
-	// char = rune(input[consumed])
-	// if char >= 1 && char <= 26 {
-	// 	letter := 'A' + (char - 1)
-	// 	key.mods += { .Control }
-	// 	key.codepoint = letter
-	// 	consumed += 1
-	// }
-	// else if char == 0 {
-	// 	key.mods += { .Control }
-	// 	key.codepoint = ' '
-	// }
-	// else {
-	// 	r, n := utf8.decode_rune(input[consumed:])
-	// 	consumed += max(1, n) // Force input to continue, even with errors
-	// 	key.codepoint = r
-	// }
-	//
-	// if special, ok := map_to_special(key); ok {
-	// 	key.codepoint = rune(special)
-	// }
-	//
-	// rest = input[consumed:]
-	// return
 
 }
 
