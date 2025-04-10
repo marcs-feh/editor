@@ -166,7 +166,7 @@ key_parser_next :: proc(parser: ^Raw_Key_Parser) -> (key: Key, had_key: bool) {
 	}
 
 	// Regular char
-	if char < 0x80 {
+	{
 		parser.current -= 1
 
 		r, n := utf8.decode_rune(parser.input[parser.current:])
