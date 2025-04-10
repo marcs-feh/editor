@@ -202,6 +202,8 @@ main :: proc(){
 	key_buffer := make([]Key, 32)
 
 	terminal_setup()
+	defer terminal_restore()
+
 	term := terminal_handle()
 
 	running := true
