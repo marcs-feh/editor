@@ -15,6 +15,36 @@ KeyModifier :: enum u8 {
 	Alt,
 }
 
+format_mods :: proc(buf: []byte, mods: KeyModifiers) -> (s: string) {
+	total := 0
+
+	if .Control in mods {
+		total += len(fmt.bprint(buf[total:], "Ctrl"))
+	}
+	if .Alt in mods {
+		total += len(fmt.bprint(buf[total:], "Alt"))
+	}
+	if .Shift in mods {
+		total += len(fmt.bprint(buf[total:], "Shift"))
+	}
+
+	return string(buf[:total])
+}
+
+format_key :: proc(buf: []byte, k: Key) -> (s: string){
+	spec := k.codepoint 
+
+	mods := format_mods(buf, k.mods)
+	buf := buf[len(mods):]
+
+	if spec >= (0xd800 + 1) && spec < (0xd800 + 1) + len(SpecialKey) {
+		return fmt.bprintf(buf, "%v %v", mods, SpecialKey(k.codepoint))
+	}
+	else {
+		return fmt.bprintf(buf, "%v %v", mods, k.codepoint)
+	}
+}
+
 SpecialKey :: enum rune {
 	// Use the surrogate pair range to represent them as runes, the editor is
 	// UTF-8 so these codepoints should never appear
@@ -24,10 +54,10 @@ SpecialKey :: enum rune {
 	Tab,
 	Home,
 	End,
-	Up,
-	Down,
 	Right,
 	Left,
+	Up,
+	Down,
 }
 
 special_key :: proc(code: SpecialKey) -> rune {
@@ -172,6 +202,9 @@ key_parser_next :: proc(parser: ^Raw_Key_Parser) -> (key: Key, had_key: bool) {
 		r, n := utf8.decode_rune(parser.input[parser.current:])
 		parser.current += max(n, 1)
 		key.codepoint = r
+		if uc.is_upper(r) {
+			key.mods += { .Shift }
+		}
 		return key, true
 	}
 
@@ -214,7 +247,10 @@ main :: proc(){
 
 		dec := key_decode(key_buffer, input)
 
-		fmt.println(dec[:])
+		b : [128]byte
+		for k in dec {
+			fmt.println( format_key(b[:],k))
+		}
 
 		if len(input) > 0 && input[0] == 3 {
 			running = false
