@@ -2,6 +2,7 @@ package edit
 
 import "core:fmt"
 import "core:mem"
+import "core:log"
 import "core:slice"
 import "core:mem/virtual"
 import uc "core:unicode"
@@ -9,73 +10,12 @@ import "core:unicode/utf8"
 import "core:unicode/utf16"
 import "core:strings"
 
+import "vendor:glfw"
+
 KeyModifier :: enum u8 {
 	Shift,
 	Control,
 	Alt,
-}
-
-format_mods :: proc(buf: []byte, mods: KeyModifiers) -> (s: string) {
-	total := 0
-
-	if .Control in mods {
-		total += len(fmt.bprint(buf[total:], "Ctrl"))
-	}
-	if .Alt in mods {
-		total += len(fmt.bprint(buf[total:], "Alt"))
-	}
-	if .Shift in mods {
-		total += len(fmt.bprint(buf[total:], "Shift"))
-	}
-
-	return string(buf[:total])
-}
-
-format_key :: proc(buf: []byte, k: Key) -> (s: string){
-	spec := k.codepoint 
-
-	mods := format_mods(buf, k.mods)
-	buf := buf[len(mods):]
-
-	if spec >= (0xd800 + 1) && spec < (0xd800 + 1) + len(SpecialKey) {
-		return fmt.bprintf(buf, "%v %v", mods, SpecialKey(k.codepoint))
-	}
-	else {
-		return fmt.bprintf(buf, "%v %v", mods, k.codepoint)
-	}
-}
-
-SpecialKey :: enum rune {
-	// Use the surrogate pair range to represent them as runes, the editor is
-	// UTF-8 so these codepoints should never appear
-	Escape = 0xd800 + 1,
-	Return,
-	Backspace,
-	Tab,
-	Home,
-	End,
-	Right,
-	Left,
-	Up,
-	Down,
-}
-
-special_key :: proc(code: SpecialKey) -> rune {
-	return rune(code)
-}
-
-map_to_special :: proc(k: Key) -> (special: SpecialKey, ok: bool) {
-	if .Control in k.mods {
-		ok = true
-		switch k.codepoint {
-		case 'M': special = .Return
-		case 'I': special = .Tab
-		case '[': special = .Escape
-		case: ok = false
-		}
-	}
-
-	return
 }
 
 KeyModifiers :: bit_set[KeyModifier; u8]
@@ -85,189 +25,64 @@ Key :: struct {
 	mods: KeyModifiers,
 }
 
-slice_peek :: proc "contextless" (s: []$T, i: int) -> (e: T, ok: bool) {
-	if i < 0 || i >= len(s){
-		return
-	}
-	#no_bounds_check e = s[i]
-	return e, true
-}
-
 Raw_Key_Parser :: struct {
 	input: []byte,
 	current: int,
 }
 
-key_parser_advance :: proc(parser: ^Raw_Key_Parser) -> (byte, bool){
-	if parser.current >= len(parser.input) {
-		return 0, false
-	}
-	parser.current += 1
-	return parser.input[parser.current - 1], true
+import "base:runtime"
+
+App_State :: struct {
+	window: glfw.WindowHandle,
+	input: [dynamic]Key,
+	ctx: runtime.Context,
 }
 
-key_parser_advance_match :: proc(parser: ^Raw_Key_Parser, target: []u8) -> bool {
-	if key_parser_has_prefix(parser^, target) {
-		parser.current += len(target)
-		return true
-	}
-	return false
+raw_key_handler :: proc "c" (window: glfw.WindowHandle, key, scancode, action, mods: i32){
+	state := cast(^App_State)glfw.GetWindowUserPointer(window)
+	context = state.ctx
+	fmt.println("Code:", scancode, "Action:", action, "Mods:", mods)
 }
 
-key_parser_done :: #force_inline proc "contextless" (parser: Raw_Key_Parser) -> bool {
-	return parser.current >= len(parser.input)
+text_key_handler :: proc "c" (window: glfw.WindowHandle, codepoint: rune, mods: i32){
+	state := cast(^App_State)glfw.GetWindowUserPointer(window)
+	context = state.ctx
+	fmt.println("Press:", codepoint, "Mods:", mods)
 }
 
-key_parser_has_prefix :: proc(parser: Raw_Key_Parser, prefix: []u8) -> bool {
-	if key_parser_done(parser) { return false }
-	current_input := parser.input[parser.current:]
-	return slice.has_prefix(current_input, prefix)
-}
-
-key_parser_next :: proc(parser: ^Raw_Key_Parser) -> (key: Key, had_key: bool) {
-	if(key_parser_done(parser^)){ return }
-
-	CSI :: []u8{'\e', '['}
-
-	ARROW_CTRL  :: []u8{'1', ';', '5'}
-	ARROW_ALT   :: []u8{'1', ';', '3'}
-	ARROW_SHIFT :: []u8{'1', ';', '2'}
-
-	ARROW_CTRL_ALT   :: []u8{'1', ';', '7'}
-	ARROW_CTRL_SHIFT :: []u8{'1', ';', '6'}
-	ARROW_SHIFT_ALT  :: []u8{'1', ';', '4'}
-
-	ARROW_CTRL_SHIFT_ALT :: []u8{'1', ';', '8'}
-
-	// Special long sequences
-	if key_parser_has_prefix(parser^, CSI){
-		parser.current += len(CSI)
-
-		switch {
-		case key_parser_advance_match(parser, ARROW_CTRL):  key.mods += { .Control }
-		case key_parser_advance_match(parser, ARROW_SHIFT): key.mods += { .Shift }
-		case key_parser_advance_match(parser, ARROW_ALT):   key.mods += { .Alt }
-
-		case key_parser_advance_match(parser, ARROW_CTRL_ALT):   key.mods += { .Control, .Alt }
-		case key_parser_advance_match(parser, ARROW_CTRL_SHIFT): key.mods += { .Control, .Shift }
-		case key_parser_advance_match(parser, ARROW_SHIFT_ALT):  key.mods += { .Shift, .Alt }
-
-		case key_parser_advance_match(parser, ARROW_CTRL_SHIFT_ALT):  key.mods += { .Control, .Shift, .Alt }
-		}
-
-		next, _ := key_parser_advance(parser)
-		switch next {
-		case 'A': key.codepoint = special_key(.Up)
-		case 'B': key.codepoint = special_key(.Down)
-		case 'C': key.codepoint = special_key(.Right)
-		case 'D': key.codepoint = special_key(.Left)
-		}
-
-		return key, true
-	}
-
-	char, _ := key_parser_advance(parser)
-
-	// Alt + Something
-	if char == '\e' {
-		if key_parser_done(parser^) || parser.input[parser.current] == '\e' {
-			key.codepoint = special_key(.Escape)
-			key.mods = {}
-			return key, true
-		}
-
-		key.mods += { .Alt }
-		char, _ = key_parser_advance(parser)
-	}
-
-	// Control + letter
-	if char < 27 {
-		key.mods += { .Control }
-		key.codepoint = rune('A' + char - 1)
-		if char == 0 {
-			key.codepoint = ' '
-		}
-
-		if special, is_special := map_to_special(key); is_special {
-			key.codepoint = rune(special)
-			key.mods -= { .Control }
-		}
-		return key, true
-	}
-
-	// Regular char
-	{
-		parser.current -= 1
-
-		r, n := utf8.decode_rune(parser.input[parser.current:])
-		parser.current += max(n, 1)
-		key.codepoint = r
-		if uc.is_upper(r) {
-			key.mods += { .Shift }
-		}
-		return key, true
-	}
-
-	return
-}
-
-key_decode :: proc(output: []Key, input: []byte) -> []Key{
-	parser := Raw_Key_Parser{
-		input = input,
-		current = 0,
-	}
-
-	count := 0
-	for key in key_parser_next(&parser){
-		if count >= len(output) { break }
-		output[count] = key
-		count += 1
-	}
-
-	return output[:count]
-
+app_state_init :: proc(state: ^App_State, allocator := context.allocator){
+	state.input = make([dynamic]Key, 0, 64)
 }
 
 main :: proc(){
 	TEXT :: "Hellope, world!"
 
-	input := make([]u8, 16)
-	key_buffer := make([]Key, 32)
+	state := new(App_State)
+	app_state_init(state)
 
-	terminal_setup()
-	defer terminal_restore()
+	logger : log.Logger
+	logger = log.create_console_logger(.Debug, { .Level, .Time, .Terminal_Color, .Short_File_Path, .Line, .Procedure })
+	defer log.destroy_console_logger(logger)
 
-	term := terminal_handle()
-
-	running := true
-
-	for running {
-		input, _ := terminal_read_input(term, input)
-		current_input := input
-
-		dec := key_decode(key_buffer, input)
-
-		b : [128]byte
-		for k in dec {
-			fmt.println( format_key(b[:],k))
-		}
-
-		if len(input) > 0 && input[0] == 3 {
-			running = false
-		}
-
+	if !glfw.Init() {
+		log.fatal("Failed to initalize GLFW:", glfw.GetError())
+		return
 	}
+	defer glfw.Terminate()
 
-	// table, _ := table_create(TEXT)
+	state.window = glfw.CreateWindow(900, 700, "Editor", nil, nil)
+	if state.window == nil {
+		log.fatal("Failed to create GLFW window:", glfw.GetError())
+		return
+	}
+	defer glfw.DestroyWindow(state.window)
 
-	// _, _ = piece_split(&table, {0, 4})
-	// _, _ = piece_split(&table, {1, 4})
+	glfw.SetWindowUserPointer(state.window, state)
+	glfw.SetCharModsCallback(state.window, text_key_handler)
+	glfw.SetKeyCallback(state.window, raw_key_handler)
 
-	// display(table)
-
-	// delete_bytes(&table, {0, 0}, 9)
-	// delete_bytes(&table, {0, 5}, 1)
-	// delete_bytes(&table, {0, 1}, 4)
-	// display(table)
-
+	for !glfw.WindowShouldClose(state.window){
+		glfw.PollEvents()
+		glfw.SwapBuffers(state.window)
+	}
 }
